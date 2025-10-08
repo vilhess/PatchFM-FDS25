@@ -1,0 +1,1 @@
+from configs.model_config import PatchFMConfig

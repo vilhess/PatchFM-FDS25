@@ -1,0 +1,9 @@
+matplotlib 
+numpy 
+scikit-learn
+scipy 
+torch
+einops
+rotary_embedding_torch
+huggingface_hub
+safetensors
