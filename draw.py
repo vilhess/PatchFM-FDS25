@@ -177,6 +177,139 @@ def _show_popup(message: str, duration_ms: int = 2200, face_color: str = "#ff4b5
     _show_popup._timer = timer
     _show_popup._artists = [txt]
 
+
+def _show_result_overlay(human_loss: float | None, ai_loss: float | None, duration_ms: int = 3500):
+    """
+    Display a big centered box announcing if the human beats the AI, in French.
+    The header is green on human win, red on human loss, grey on tie.
+    Also shows both losses. Auto-hides after duration_ms.
+    """
+    global fig
+
+    if fig is None:
+        # Fallback to console output
+        try:
+            if human_loss is None or ai_loss is None or not np.isfinite(human_loss) or not np.isfinite(ai_loss):
+                print("Résultat indisponible.")
+            else:
+                if human_loss < ai_loss:
+                    print(f"Tu as gagné !\nPerte humaine: {human_loss:.4f}\nPerte IA: {ai_loss:.4f}")
+                elif human_loss > ai_loss:
+                    print(f"Tu as perdu.\nPerte humaine: {human_loss:.4f}\nPerte IA: {ai_loss:.4f}")
+                else:
+                    print(f"Égalité !\nPerte humaine: {human_loss:.4f}\nPerte IA: {ai_loss:.4f}")
+        except Exception:
+            pass
+        return
+
+    # Clear any previous overlay
+    try:
+        prev_timer = getattr(_show_result_overlay, "_timer", None)
+        if prev_timer is not None:
+            try:
+                prev_timer.stop()
+            except Exception:
+                pass
+        for a in getattr(_show_result_overlay, "_artists", []):
+            try:
+                a.remove()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    if human_loss is None or ai_loss is None or not np.isfinite(human_loss) or not np.isfinite(ai_loss):
+        return
+
+    # Decide outcome
+    WIN = "#2ecc71"
+    LOSE = "#ff6b6b"
+    TIE = "#6c757d"
+    if human_loss < ai_loss:
+        title = "Bravo, tu as gagné !"
+        color = WIN
+    elif human_loss > ai_loss:
+        title = "Tu as perdu."
+        color = LOSE
+    else:
+        title = "Égalité !"
+        color = TIE
+
+    # Panel geometry (figure coordinates)
+    x0, y0, w, h = 0.3, 0.24, 0.4, 0.48
+
+    artists = []
+    try:
+        from matplotlib.patches import FancyBboxPatch
+        panel = FancyBboxPatch((x0, y0), w, h,
+                               transform=fig.transFigure,
+                               boxstyle="round,pad=0.015",
+                               facecolor="#ffffff",
+                               edgecolor=color,
+                               linewidth=3.0,
+                               zorder=200,
+                               alpha=0.98)
+        fig.add_artist(panel)
+        artists.append(panel)
+    except Exception:
+        panel = None
+
+    # Title and losses
+    t_title = fig.text(x0 + w/2, y0 + h*0.78, title,
+                       ha="center", va="center",
+                       fontsize=24, fontweight="bold",
+                       color=color, transform=fig.transFigure,
+                       zorder=210)
+    artists.append(t_title)
+
+    # Loss lines with winner in green, loser in red
+    human_col = WIN if human_loss <= ai_loss else LOSE
+    ai_col = WIN if ai_loss < human_loss else (LOSE if ai_loss > human_loss else TIE)
+
+    t_h = fig.text(x0 + w/2, y0 + h*0.52,
+                   f"Perte humaine: {human_loss:.4f}",
+                   ha="center", va="center",
+                   fontsize=18, fontweight="bold",
+                   color=human_col, transform=fig.transFigure,
+                   zorder=210)
+    t_ai = fig.text(x0 + w/2, y0 + h*0.36,
+                    f"Perte IA: {ai_loss:.4f}",
+                    ha="center", va="center",
+                    fontsize=18, fontweight="bold",
+                    color=ai_col, transform=fig.transFigure,
+                    zorder=210)
+    artists.extend([t_h, t_ai])
+
+    # Optional hint
+    t_hint = fig.text(x0 + w/2, y0 + h*0.14,
+                      "La boîte disparaîtra bientôt…",
+                      ha="center", va="center",
+                      fontsize=11, color="#FFA500",
+                      transform=fig.transFigure, zorder=210)
+    artists.append(t_hint)
+
+    fig.canvas.draw_idle()
+
+    # schedule removal
+    timer = fig.canvas.new_timer(interval=int(duration_ms))
+
+    def _remove_overlay():
+        try:
+            for a in artists:
+                try:
+                    a.remove()
+                except Exception:
+                    pass
+            fig.canvas.draw_idle()
+        except Exception:
+            pass
+
+    timer.add_callback(_remove_overlay)
+    timer.start()
+
+    _show_result_overlay._timer = timer
+    _show_result_overlay._artists = artists
+
 def _timeout_handler(signum, frame):
     raise TimeoutError("operation timed out")
 
@@ -593,6 +726,11 @@ def _validate_and_plot():
     if mse_pred is not None and human_mse is not None:
         add_result(human_mse, mse_pred)
         print(f"Résultats sauvegardés dans results.json (Human loss: {human_mse:.4f}, AI loss: {mse_pred:.4f})")
+        # Show big overlay with outcome
+        try:
+            _show_result_overlay(human_mse, mse_pred)
+        except Exception:
+            pass
     else:
         print(f"Résultats non sauvegardés (Human loss: {human_mse:.4f}, AI loss: {mse_pred})")
 
