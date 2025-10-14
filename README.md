@@ -1,16 +1,58 @@
-# Si pas d'environnement : 
-``` python -m venv jds ```
+# 🎯 Jeu – Fête de la Science 2025 (Rouen)
 
-# Activation :
-``` source jds/bin/activate ```
+## 🧠 Prédiction de signaux : Humain vs IA
 
-# Installation :
-``` pip install -r requirements.txt```
+Ce jeu interactif met en compétition les **humains** et une **IA** dans la prédiction de signaux temporels.  
+L’objectif : comparer les performances humaines à celles d’un modèle de fondation.
 
+---
 
-# Lancer le jeu:
-``` python draw.py``` 
+## ⚙️ Modèle de fondation utilisé
 
+**PatchFM** — un modèle basé sur les Transformers pour la prédiction de séries temporelles.  
+🔗 [Accéder au dépôt GitHub PatchFM](https://github.com/vilhess/PatchFM)
 
-# Desactivation :
-``` deactivate```
+---
+
+## 🚀 Installation et exécution
+
+### 1. Création d’un environnement virtuel (si nécessaire)
+```bash
+python -m venv jds
+```
+
+### 2. Activation de l’environnement
+```bash
+source jds/bin/activate
+```
+
+### 3. Installation des dépendances
+```bash
+pip install -r requirements.txt
+```
+
+### 4. Lancement du jeu
+```bash
+python draw.py
+```
+
+### 5. Désactivation de l’environnement
+```bash
+deactivate
+```
+
+---
+
+## 🧩 Description rapide du jeu
+
+- L’utilisateur observe une **série temporelle**.  
+- Il doit **prédire la suite de la série** aussi précisément que possible.  
+- L’IA réalise la même tâche à l’aide du modèle **PatchFM**.  
+- Les performances des deux sont comparées et affichées en temps réel.
+
+---
+
+## 👨‍💻 Auteurs
+
+Projet développé dans le cadre de la **Fête de la Science 2025** à Rouen.  
+Conception : **Vilhes Samy-Melwan** – [PatchFM](https://github.com/vilhess/PatchFM)
