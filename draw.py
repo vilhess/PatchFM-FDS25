@@ -9,11 +9,10 @@ import os
 import signal
 import pickle
 from utils import add_result, get_results
-from model import Forecaster
-from configs import PatchFMConfig
+from patchfm import Forecaster, PatchFMConfig
 
 # --- Model setup ---
-config = PatchFMConfig(compile=True, load_from_hub=True)
+config = PatchFMConfig(compile=True)
 model = Forecaster(config)
 
 # get_pred takes as input (x_obs, future_length) and returns y_pred of shape (future_length,)

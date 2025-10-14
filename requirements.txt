@@ -1,9 +1,4 @@
 matplotlib 
-numpy 
 scikit-learn
 scipy 
-torch
-einops
-rotary_embedding_torch
-huggingface_hub
-safetensors
+patchfm==1.1.4
