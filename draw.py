@@ -15,10 +15,6 @@ from patchfm import Forecaster, PatchFMConfig
 config = PatchFMConfig(compile=True)
 model = Forecaster(config)
 
-# get_pred takes as input (x_obs, future_length) and returns y_pred of shape (future_length,)
-# add_result(human_loss, ai_loss) appends the losses to results.json
-# get_results() returns the mean human loss, mean AI loss, and count from results.json
-
 # --- Dataset management ---
 DATASET_OPTIONS = ["simple.npy", "medium.npy", "dic_stocks.pkl"]
 DATASET_LABELS = {
