@@ -7,6 +7,16 @@ L’objectif : comparer les performances humaines à celles d’un modèle de fo
 
 ---
 
+## 🎬 Demo en vidéo
+
+<video controls width="720">
+	<source src="assets/fds.mp4" type="video/mp4">
+	<source src="assets/fds.mov" type="video/quicktime">
+	Votre navigateur ne prend pas en charge la lecture vidéo. Vous pouvez télécharger la démo ici :
+	[assets/fds.mov](assets/fds.mov)
+</video>
+
+
 ## ⚙️ Modèle de fondation utilisé
 
 **PatchFM** — un modèle basé sur les Transformers pour la prédiction de séries temporelles.  
