@@ -56,8 +56,8 @@ def _load_dataset_by_name(name: str) -> bool:
                 arr = arr.reshape(1, -1)
             data = arr
         current_dataset_name = name
-        if name in DATASET_OPTIONS:
-            current_dataset_index = DATASET_OPTIONS.index(name)
+        if os.path.basename(name) in DATASET_OPTIONS:
+            current_dataset_index = DATASET_OPTIONS.index(os.path.basename(name))
         print(f"Dataset chargé: {name} (shape={getattr(data, 'shape', None)})")
         return True
     except Exception as exc:
@@ -79,7 +79,7 @@ def _dataset_name_from_label(label: str) -> str:
     # Fallback: assume label is a filename if unmatched
     return label
 
-MAX_CTX = 512
+MAX_CTX = 256
 FORECAST_HORIZON = 32
 
 
@@ -177,137 +177,93 @@ def _show_popup(message: str, duration_ms: int = 2200, face_color: str = "#ff4b5
     _show_popup._artists = [txt]
 
 
-def _show_result_overlay(human_loss: float | None, ai_loss: float | None, duration_ms: int = 6000):
-    """
-    Display a big centered box announcing if the human beats the AI, in French.
-    The header is green on human win, red on human loss, grey on tie.
-    Also shows both losses. Auto-hides after duration_ms.
-    """
-    global fig
+# --- Winner box (shown a moment after the robot finished drawing) ---
+WINNER_DELAY_MS = 2000
+WINNER_SHOW_MS = 5000
+winner_artists = []
+winner_timers = []
 
-    if fig is None:
-        # Fallback to console output
+
+def _stop_winner_timers():
+    for tm in winner_timers:
         try:
-            if human_loss is None or ai_loss is None or not np.isfinite(human_loss) or not np.isfinite(ai_loss):
-                print("Résultat indisponible.")
-            else:
-                if human_loss < ai_loss:
-                    print(f"Tu as gagné !\nPerte humaine: {human_loss:.4f}\nPerte IA: {ai_loss:.4f}")
-                elif human_loss > ai_loss:
-                    print(f"Tu as perdu.\nPerte humaine: {human_loss:.4f}\nPerte IA: {ai_loss:.4f}")
-                else:
-                    print(f"Égalité !\nPerte humaine: {human_loss:.4f}\nPerte IA: {ai_loss:.4f}")
+            tm.stop()
         except Exception:
             pass
+    winner_timers.clear()
+
+
+def _hide_winner_box(redraw: bool = True):
+    for a in winner_artists:
+        try:
+            a.remove()
+        except Exception:
+            pass
+    had_box = bool(winner_artists)
+    winner_artists.clear()
+    if redraw and had_box and fig is not None:
+        fig.canvas.draw_idle()
+    return had_box
+
+
+def _show_winner_box():
+    """Big friendly box announcing the winner; confetti if the child won, crying emoji otherwise."""
+    from matplotlib.patches import FancyBboxPatch
+    from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+    _hide_winner_box(redraw=False)
+    if human_mse is None or mse_pred is None or not np.isfinite(human_mse) or not np.isfinite(mse_pred):
         return
-
-    # Clear any previous overlay
-    try:
-        prev_timer = getattr(_show_result_overlay, "_timer", None)
-        if prev_timer is not None:
-            try:
-                prev_timer.stop()
-            except Exception:
-                pass
-        for a in getattr(_show_result_overlay, "_artists", []):
-            try:
-                a.remove()
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-    if human_loss is None or ai_loss is None or not np.isfinite(human_loss) or not np.isfinite(ai_loss):
-        return
-
-    # Decide outcome
-    WIN = "#2ecc71"
-    LOSE = "#ff6b6b"
-    TIE = "#6c757d"
-    if human_loss < ai_loss:
-        title = "Bravo, tu as battu l'IA !"
-        color = WIN
-    elif human_loss > ai_loss:
-        title = "L'IA gagne cette fois..."
-        color = LOSE
+    if human_mse < mse_pred:
+        title, col, emo = "Tu as gagné !", "#2bb673", "\U0001F973"
+    elif human_mse > mse_pred:
+        title, col, emo = "Le robot a gagné...", "#f25f5c", "\U0001F62D"
     else:
-        title = "Égalité !"
-        color = TIE
+        title, col, emo = "Égalité !", "#6c757d", "\U0001F91D"
 
-    # Panel geometry (figure coordinates)
-    x0, y0, w, h = 0.3, 0.24, 0.4, 0.48
+    # centred over the main plot, in figure coordinates
+    pos = ax.get_position()
+    w, h = 0.34, 0.40
+    x0, y0 = pos.x0 + (pos.width - w) / 2, pos.y0 + (pos.height - h) / 2 + 0.02
+    cx = x0 + w / 2
+    fw, fh = fig.get_size_inches()
+    panel = FancyBboxPatch((x0, y0), w, h, transform=fig.transFigure,
+                           boxstyle="round,pad=0,rounding_size=0.03", mutation_aspect=fw / fh,
+                           facecolor="#ffffff", edgecolor=col, linewidth=5, zorder=200)
+    fig.add_artist(panel)
+    winner_artists.append(panel)
 
-    artists = []
-    try:
-        from matplotlib.patches import FancyBboxPatch
-        panel = FancyBboxPatch((x0, y0), w, h,
-                               transform=fig.transFigure,
-                               boxstyle="round,pad=0.015",
-                               facecolor="#ffffff",
-                               edgecolor=color,
-                               linewidth=3.0,
-                               zorder=200,
-                               alpha=0.98)
-        fig.add_artist(panel)
-        artists.append(panel)
-    except Exception:
-        panel = None
-
-    # Title and losses
-    t_title = fig.text(x0 + w/2, y0 + h*0.78, title,
-                       ha="center", va="center",
-                       fontsize=28, fontweight="bold",
-                       color=color, transform=fig.transFigure,
-                       zorder=210)
-    artists.append(t_title)
-
-    # Loss lines with winner in green, loser in red
-    human_col = WIN if human_loss <= ai_loss else LOSE
-    ai_col = WIN if ai_loss < human_loss else (LOSE if ai_loss > human_loss else TIE)
-
-    t_h = fig.text(x0 + w/2, y0 + h*0.52,
-                   f"Toi : {_fmt_score(human_loss)}",
-                   ha="center", va="center",
-                   fontsize=22, fontweight="bold",
-                   color=human_col, transform=fig.transFigure,
-                   zorder=210)
-    t_ai = fig.text(x0 + w/2, y0 + h*0.36,
-                    f"IA : {_fmt_score(ai_loss)}",
-                    ha="center", va="center",
-                    fontsize=22, fontweight="bold",
-                    color=ai_col, transform=fig.transFigure,
-                    zorder=210)
-    artists.extend([t_h, t_ai])
-
-    # Optional hint
-    t_hint = fig.text(x0 + w/2, y0 + h*0.15,
-                      "Plus le score est petit, plus tu es proche de la vraie courbe.\nClique sur « Nouvelle courbe » pour rejouer !",
-                      ha="center", va="center",
-                      fontsize=13, color=TEXT_DARK,
-                      transform=fig.transFigure, zorder=210)
-    artists.append(t_hint)
-
+    img = _emoji_img(emo)
+    if img is not None:
+        ab = AnnotationBbox(OffsetImage(img, zoom=70 / img.shape[0]), (cx, y0 + h * 0.70),
+                            xycoords="figure fraction", frameon=False, zorder=210)
+        fig.add_artist(ab)
+        winner_artists.append(ab)
+    kw = dict(ha="center", va="center", transform=fig.transFigure, zorder=210)
+    winner_artists.append(fig.text(cx, y0 + h * 0.40, title, fontsize=30, fontweight="bold", color=col, **kw))
+    winner_artists.append(fig.text(cx, y0 + h * 0.22,
+                                   f"Toi : {_fmt_score(human_mse)}     Robot : {_fmt_score(mse_pred)}",
+                                   fontsize=16, color=TEXT_DARK, **kw))
+    winner_artists.append(fig.text(cx, y0 + h * 0.08, "(clique pour fermer)", fontsize=10,
+                                   color="#8a90a6", **kw))
+    if human_mse < mse_pred:
+        _launch_confetti()
     fig.canvas.draw_idle()
 
-    # schedule removal
-    timer = fig.canvas.new_timer(interval=int(duration_ms))
+    close_timer = fig.canvas.new_timer(interval=WINNER_SHOW_MS)
+    close_timer.single_shot = True
+    close_timer.add_callback(_hide_winner_box)
+    close_timer.start()
+    winner_timers.append(close_timer)
 
-    def _remove_overlay():
-        try:
-            for a in artists:
-                try:
-                    a.remove()
-                except Exception:
-                    pass
-            fig.canvas.draw_idle()
-        except Exception:
-            pass
 
-    timer.add_callback(_remove_overlay)
+def _schedule_winner_box():
+    _stop_winner_timers()
+    timer = fig.canvas.new_timer(interval=WINNER_DELAY_MS)
+    timer.single_shot = True
+    timer.add_callback(_show_winner_box)
     timer.start()
+    winner_timers.append(timer)
 
-    _show_result_overlay._timer = timer
-    _show_result_overlay._artists = artists
 
 SCORE_SCALE = 100  # raw MSE values are tiny, show them x100 to kids
 
@@ -520,8 +476,7 @@ def _ai_anim_tick():
         # Done: full redraw reveals the result banner
         _stop_ai_anim()
         _refresh_main_axes()
-        if human_mse is not None and mse_pred is not None and human_mse < mse_pred:
-            _launch_confetti()
+        _schedule_winner_box()
         return
     ai_line.set_data(x_future[:ai_anim_step], mp[:ai_anim_step])
     _move_robot((x_future[ai_anim_step - 1], mp[ai_anim_step - 1]))
@@ -544,6 +499,8 @@ def _start_ai_anim():
 def _clear_drawn_points():
     _stop_ai_anim()
     _stop_confetti()
+    _stop_winner_timers()
+    _hide_winner_box(redraw=False)
     drawn_x.clear()
     drawn_y.clear()
     global human_pred, human_mse, model_pred, mse_pred
@@ -565,6 +522,85 @@ def _normalize_model_pred(p):
         return arr
     except Exception:
         return None
+
+
+# --- Draggable view window (mini overview of the whole signal under the plot) ---
+VIEW_POINTS = 3 * FORECAST_HORIZON   # points visible in the main plot
+view_start_idx = None   # first visible index; None = latest window (ends with the yellow zone)
+overview_ax = None
+view_rect = None
+dragging_view = False
+
+
+def _view_bounds():
+    i_max = max(0, len(x) - VIEW_POINTS)
+    i0 = i_max if view_start_idx is None else int(np.clip(view_start_idx, 0, i_max))
+    return i0, min(len(x) - 1, i0 + VIEW_POINTS - 1)
+
+
+def _apply_view(redraw: bool = True):
+    """Fit the main plot to the window selected in the overview."""
+    i0, i1 = _view_bounds()
+    ax.set_xlim(x[i0], x[i1])
+    # Only use what the player is allowed to know: the past (+ the future once validated)
+    vals = [y[i0:min(i1 + 1, n_obs)]]
+    if human_pred is not None:
+        vals += [y_future, human_pred]
+        mp = _normalize_model_pred(model_pred)
+        if mp is not None:
+            vals.append(mp)
+    if drawn_y:
+        vals.append(np.asarray(drawn_y))
+    seg = np.concatenate([np.asarray(v, dtype=float).reshape(-1) for v in vals if len(v)])
+    lo, hi = np.nanmin(seg), np.nanmax(seg)
+    if human_pred is None and i1 >= n_obs:
+        # yellow zone visible: leave room above/below to draw the continuation
+        pad = max(0.35 * (hi - lo), 0.3)
+    else:
+        pad = 0.08 * (hi - lo) if hi > lo else 0.1
+    ax.set_ylim(lo - pad, hi + pad)
+    if view_rect is not None:
+        view_rect.set_x(x[i0])
+        view_rect.set_width(x[i1] - x[i0])
+    if redraw:
+        ax.figure.canvas.draw_idle()
+
+
+def _move_view_to(xdata):
+    global view_start_idx
+    view_start_idx = int(np.searchsorted(x, xdata)) - VIEW_POINTS // 2
+    _apply_view()
+
+
+def _refresh_overview():
+    global view_rect
+    if overview_ax is None or x_obs is None:
+        return
+    from matplotlib.patches import Rectangle
+    overview_ax.clear()
+    overview_ax.set_facecolor("#ffffff")
+    overview_ax.set_xticks([])
+    overview_ax.set_yticks([])
+    for sp in overview_ax.spines.values():
+        sp.set_edgecolor("#c9d3ee")
+        sp.set_linewidth(1.5)
+    overview_ax.plot(x_obs, y_obs, color=COLOR_OBS, linewidth=1.5)
+    overview_ax.axvspan(x_future[0], x_future[-1], color=COLOR_WINDOW, alpha=0.5)
+    if human_pred is not None:
+        overview_ax.plot(x_future, y_future, color=COLOR_FUTURE, linewidth=1.5)
+    overview_ax.set_xlim(x[0], x[-1])
+    known = y if human_pred is not None else y_obs
+    lo, hi = np.nanmin(known), np.nanmax(known)
+    pad = 0.1 * (hi - lo) if hi > lo else 0.1
+    overview_ax.set_ylim(lo - pad, hi + pad)
+    i0, i1 = _view_bounds()
+    view_rect = Rectangle((x[i0], lo - pad), x[i1] - x[i0], hi - lo + 2 * pad,
+                          facecolor="#4d96ff", alpha=0.18, edgecolor="#4d96ff", linewidth=2.5)
+    overview_ax.add_patch(view_rect)
+    t = overview_ax.text(0.035, 1.18, "Glisse le cadre bleu pour voir le passé",
+                         transform=overview_ax.transAxes, ha="left", va="center",
+                         fontsize=11, color="#6b7390", clip_on=False)
+    _emoji_at(t, "\U0001F449", "left", scale=1.3)
 
 
 def _refresh_main_axes():
@@ -629,8 +665,8 @@ def _refresh_main_axes():
         hint_emoji = _emoji_at(hint_artist, "\u270F\uFE0F", side="top", scale=1.8, pad=0.9)
         hint_artist._emoji = hint_emoji
 
-    ax.set_xlim(x[max(0, n_obs - 2 * n_future)], x[-1])
-    ax.set_ylim(*y_lim)
+    _refresh_overview()
+    _apply_view(redraw=False)
     ax.set_autoscale_on(False)
     # Title: instructions while playing, gentle result banner once validated
     ds_base = _dataset_display_name(current_dataset_name or "?")
@@ -786,8 +822,9 @@ def _generate_new_signal(index: int | None = None):
         y_series = row[-tail_len:]
         current_stock_name = None
 
-    y_series = y_series - np.mean(y_series)  # Center the signal
-    y_series = y_series / (np.std(y_series) + 0.0005)  # Normalize the signal
+    # Normalize with the past only so the scale gives no hint about the future
+    past = y_series[:-n_future]
+    y_series = (y_series - np.mean(past)) / (np.std(past) + 0.0005)
     x_series = np.linspace(0, len(y_series), len(y_series))
 
     x = x_series
@@ -799,9 +836,6 @@ def _generate_new_signal(index: int | None = None):
     x_obs, y_obs = x[:n_obs], y[:n_obs]
     x_future, y_future = x[n_obs:], y[n_obs:]
 
-    y_min, y_max = np.nanmin(y[max(0, n_obs - 2 * n_future):]), np.nanmax(y[max(0, n_obs - 2 * n_future):])
-    pad = 0.05 * (y_max - y_min) if (y_max - y_min) > 0 else 0.05
-    y_lim = (y_min - pad, y_max + pad)
     model_pred = None
     mse_pred = None
     # reset human validated prediction
@@ -809,6 +843,8 @@ def _generate_new_signal(index: int | None = None):
     human_pred = None
     human_mse = None
     hint_used = False
+    global view_start_idx
+    view_start_idx = None
 
 # --- Points drawn by the child ---
 drawn_x = []
@@ -948,11 +984,18 @@ def _validate_and_plot():
 
 # --- Event functions ---
 def on_press(event):
-    # Only allow drawing inside the future window and with finite coordinates
+    global dragging_view
     if x_future is None:
         return
+    if _hide_winner_box():
+        return
+    if overview_ax is not None and event.inaxes is overview_ax and event.xdata is not None:
+        dragging_view = True
+        _move_view_to(event.xdata)
+        return
+    # Only allow drawing inside the future window and with finite coordinates
     if (
-        event.inaxes
+        event.inaxes is ax
         and event.xdata is not None and np.isfinite(event.xdata)
         and event.ydata is not None and np.isfinite(event.ydata)
         and x_future[0] <= event.xdata <= x_future[-1]
@@ -967,8 +1010,12 @@ def on_move(event):
     # While dragging with left button, constrain to the future window and finite values
     if x_future is None:
         return
+    if dragging_view:
+        if event.inaxes is overview_ax and event.xdata is not None:
+            _move_view_to(event.xdata)
+        return
     if (
-        event.inaxes and event.button == 1
+        event.inaxes is ax and event.button == 1
         and event.xdata is not None and np.isfinite(event.xdata)
         and event.ydata is not None and np.isfinite(event.ydata)
         and x_future[0] <= event.xdata <= x_future[-1]
@@ -976,6 +1023,11 @@ def on_move(event):
     ):
         _add_drawn_point(event.xdata, event.ydata)
     _update_validate_button_state()
+
+def on_release(event):
+    global dragging_view
+    dragging_view = False
+
 
 def on_key(event):
     global drawn_x, drawn_y
@@ -1123,7 +1175,8 @@ if not _load_dataset_by_name("simple.npy"):
 _generate_new_signal()
 
 fig, ax = plt.subplots(figsize=(14, 6))
-plt.subplots_adjust(left=0.04, right=0.76, top=0.86, bottom=0.26)
+plt.subplots_adjust(left=0.04, right=0.76, top=0.86, bottom=0.37)
+overview_ax = fig.add_axes([0.04, 0.235, 0.72, 0.075])
 _maximize_current_figure()
 
 _clear_drawn_points()
@@ -1285,12 +1338,14 @@ _style_button(button_close, radius_px=10)
 _rounded_bg(radio_ax, "#ffffff", edge="#d6def5", lw=1.5)
 if ranking_ax is not None:
     ranking_ax.set_frame_on(False)
+_refresh_main_axes()  # ranking panel exists now, draw it from the start
 _update_validate_button_state()
 
 # --- Event bindings ---
 fig.canvas.mpl_connect("button_press_event", on_press)
 fig.canvas.mpl_connect("motion_notify_event", on_move)
 fig.canvas.mpl_connect("motion_notify_event", on_hover)
+fig.canvas.mpl_connect("button_release_event", on_release)
 fig.canvas.mpl_connect("key_press_event", on_key)
 
 plt.show()
