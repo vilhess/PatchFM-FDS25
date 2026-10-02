@@ -11,16 +11,18 @@ import pickle
 from utils import add_result, get_results
 from patchfm import Forecaster, PatchFMConfig
 
+plt.rcParams["font.family"] = ["Arial Rounded MT Bold", "DejaVu Sans"]
+
 # --- Model setup ---
-config = PatchFMConfig(compile=True)
+config = PatchFMConfig(compile=False, full_leakage=False)
 model = Forecaster(config)
 
 # --- Dataset management ---
 DATASET_OPTIONS = ["simple.npy", "medium.npy", "dic_stocks.pkl"]
 DATASET_LABELS = {
-    "simple.npy": "Simple",
+    "simple.npy": "Facile",
     "medium.npy": "Moyen",
-    "dic_stocks.pkl": "Cours de bourse",
+    "dic_stocks.pkl": "Bourse (expert)",
 }
 current_dataset_name = None
 data = None
@@ -63,11 +65,11 @@ def _load_dataset_by_name(name: str) -> bool:
         return False
 
 def _dataset_label() -> str:
-    base = DATASET_LABELS.get(current_dataset_name or "", os.path.splitext(os.path.basename(current_dataset_name or "?"))[0])
-    return f"Données: {base}"
+    return f"Niveau : {_dataset_display_name(current_dataset_name or '?')}"
 
 def _dataset_display_name(name: str) -> str:
-    return DATASET_LABELS.get(name, os.path.splitext(os.path.basename(name))[0])
+    base = os.path.basename(name)
+    return DATASET_LABELS.get(base, os.path.splitext(base)[0])
 
 def _dataset_name_from_label(label: str) -> str:
     # Reverse lookup from display label to filename
@@ -113,8 +115,10 @@ COLOR_PRED = "#ef476f"         # rose vif
 COLOR_DRAWN = "#06d6a0"        # vert menthe
 COLOR_WINDOW = "#ffd166"       # jaune clair
 COLOR_MODEL = "#7b2cbf"        # violet modèle
-AX_FACE = "#fff7eb"
-FIG_FACE = "#fce8f5"
+AX_FACE = "#ffffff"
+FIG_FACE = "#eef3ff"
+TEXT_DARK = "#2d3047"
+hint_artist = None
 
 def _show_popup(message: str, duration_ms: int = 2200, face_color: str = "#ff4b5c"):
     """
@@ -147,8 +151,8 @@ def _show_popup(message: str, duration_ms: int = 2200, face_color: str = "#ff4b5
 
     # create centered text near top of figure
     txt = fig.text(
-        0.5, 0.95, message,
-        ha="center", va="top", fontsize=12, color="#ffffff",
+        0.5, 0.97, message,
+        ha="center", va="top", fontsize=16, fontweight="bold", color="#ffffff",
         bbox=dict(facecolor=face_color, boxstyle="round,pad=0.6", alpha=0.95, edgecolor="none"),
         zorder=50
     )
@@ -173,7 +177,7 @@ def _show_popup(message: str, duration_ms: int = 2200, face_color: str = "#ff4b5
     _show_popup._artists = [txt]
 
 
-def _show_result_overlay(human_loss: float | None, ai_loss: float | None, duration_ms: int = 3500):
+def _show_result_overlay(human_loss: float | None, ai_loss: float | None, duration_ms: int = 6000):
     """
     Display a big centered box announcing if the human beats the AI, in French.
     The header is green on human win, red on human loss, grey on tie.
@@ -221,10 +225,10 @@ def _show_result_overlay(human_loss: float | None, ai_loss: float | None, durati
     LOSE = "#ff6b6b"
     TIE = "#6c757d"
     if human_loss < ai_loss:
-        title = "Bravo, tu as gagné !"
+        title = "Bravo, tu as battu l'IA !"
         color = WIN
     elif human_loss > ai_loss:
-        title = "Tu as perdu."
+        title = "L'IA gagne cette fois..."
         color = LOSE
     else:
         title = "Égalité !"
@@ -252,7 +256,7 @@ def _show_result_overlay(human_loss: float | None, ai_loss: float | None, durati
     # Title and losses
     t_title = fig.text(x0 + w/2, y0 + h*0.78, title,
                        ha="center", va="center",
-                       fontsize=24, fontweight="bold",
+                       fontsize=28, fontweight="bold",
                        color=color, transform=fig.transFigure,
                        zorder=210)
     artists.append(t_title)
@@ -262,24 +266,24 @@ def _show_result_overlay(human_loss: float | None, ai_loss: float | None, durati
     ai_col = WIN if ai_loss < human_loss else (LOSE if ai_loss > human_loss else TIE)
 
     t_h = fig.text(x0 + w/2, y0 + h*0.52,
-                   f"Perte humaine: {human_loss:.4f}",
+                   f"Toi : {_fmt_score(human_loss)}",
                    ha="center", va="center",
-                   fontsize=18, fontweight="bold",
+                   fontsize=22, fontweight="bold",
                    color=human_col, transform=fig.transFigure,
                    zorder=210)
     t_ai = fig.text(x0 + w/2, y0 + h*0.36,
-                    f"Perte IA: {ai_loss:.4f}",
+                    f"IA : {_fmt_score(ai_loss)}",
                     ha="center", va="center",
-                    fontsize=18, fontweight="bold",
+                    fontsize=22, fontweight="bold",
                     color=ai_col, transform=fig.transFigure,
                     zorder=210)
     artists.extend([t_h, t_ai])
 
     # Optional hint
-    t_hint = fig.text(x0 + w/2, y0 + h*0.14,
-                      "La boîte disparaîtra bientôt…",
+    t_hint = fig.text(x0 + w/2, y0 + h*0.15,
+                      "Plus le score est petit, plus tu es proche de la vraie courbe.\nClique sur « Nouvelle courbe » pour rejouer !",
                       ha="center", va="center",
-                      fontsize=11, color="#FFA500",
+                      fontsize=13, color=TEXT_DARK,
                       transform=fig.transFigure, zorder=210)
     artists.append(t_hint)
 
@@ -305,15 +309,38 @@ def _show_result_overlay(human_loss: float | None, ai_loss: float | None, durati
     _show_result_overlay._timer = timer
     _show_result_overlay._artists = artists
 
+SCORE_SCALE = 100  # raw MSE values are tiny, show them x100 to kids
+
+
+def _fmt_score(v) -> str:
+    return f"{v * SCORE_SCALE:.2f}"
+
+
 def _timeout_handler(signum, frame):
     raise TimeoutError("operation timed out")
+
+def _rounded_bg(axis, face, edge="none", radius_px=18, lw=0):
+    """Hide the rectangular axes background and draw a rounded one instead."""
+    from matplotlib.patches import FancyBboxPatch
+    axis.patch.set_visible(False)
+    for sp in axis.spines.values():
+        sp.set_visible(False)
+    bbox = axis.get_window_extent()
+    w_px, h_px = max(bbox.width, 1), max(bbox.height, 1)
+    patch = FancyBboxPatch((0, 0), 1, 1, transform=axis.transAxes, clip_on=False,
+                           boxstyle=f"round,pad=0,rounding_size={radius_px / w_px}",
+                           mutation_aspect=w_px / h_px,
+                           facecolor=face, edgecolor=edge, linewidth=lw, zorder=0)
+    axis.add_patch(patch)
+    return patch
+
 
 def _update_legend(axis: plt.Axes):
     """Place a larger legend box just outside the plot with pretty styling."""
     handles, labels = axis.get_legend_handles_labels()
     unique = {}
     for handle, label in zip(handles, labels):
-        if label not in unique and label:
+        if label not in unique and label and not label.startswith("_"):
             unique[label] = handle
 
     if not unique:
@@ -323,21 +350,200 @@ def _update_legend(axis: plt.Axes):
     axis.legend(
         list(unique.values()),
         list(unique.keys()),
-        loc="center left",
-        bbox_to_anchor=(1.08, 0.5),
+        loc="lower left",
+        bbox_to_anchor=(0.01, 0.02),
         borderaxespad=0.9,
         frameon=True,
         facecolor="white",
         edgecolor="#d7d7d7",
-        fontsize=12,
-        borderpad=1.3,
-        labelspacing=1.1,
-        handlelength=2.8,
+        fontsize=11,
+        borderpad=0.8,
+        labelspacing=0.6,
+        handlelength=2.2,
         fancybox=True
     )
 
 
+# --- AI prediction animation (line grows with a robot at its tip) ---
+AI_ANIM_INTERVAL_MS = 70
+ai_anim_step = None   # None = AI curve fully shown; int = number of points revealed so far
+ai_anim_timer = None
+ai_line = None
+robot_artist = None
+
+
+_EMOJI_CACHE = {}
+
+
+def _emoji_img(chars: str):
+    """Render emoji to an RGBA array (matplotlib can't draw colour emoji itself). None if unavailable."""
+    if chars not in _EMOJI_CACHE:
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+            font = ImageFont.truetype("/System/Library/Fonts/Apple Color Emoji.ttc", 160)
+            im = Image.new("RGBA", (180 * len(chars) + 20, 200), (0, 0, 0, 0))
+            ImageDraw.Draw(im).text((10, 10), chars, font=font, embedded_color=True)
+            _EMOJI_CACHE[chars] = np.asarray(im.crop(im.getbbox()))
+        except Exception:
+            _EMOJI_CACHE[chars] = None
+    return _EMOJI_CACHE[chars]
+
+
+def _emoji_at(text, chars: str, side: str = "left", scale: float = 1.25, pad: float = 0.25):
+    """Stick an emoji image next to a Text artist (left, right or top of it)."""
+    from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+    img = _emoji_img(chars)
+    if img is None:
+        return None
+    zoom = text.get_fontsize() * scale / img.shape[0]
+    anchor, align = {
+        "left": ((0, 0.5), (1 + pad, 0.5)),
+        "right": ((1, 0.5), (-pad, 0.5)),
+        "top": ((0.5, 1), (0.5, -pad)),
+    }[side]
+    ab = AnnotationBbox(OffsetImage(img, zoom=zoom), anchor, xycoords=text, box_alignment=align,
+                        frameon=False, zorder=text.get_zorder() + 1, annotation_clip=False)
+    (text.axes if text.axes is not None else text.figure).add_artist(ab)
+    return ab
+
+
+ROBOT_IMG = _emoji_img("\U0001F916")
+
+
+def _make_robot(xy):
+    from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+    if ROBOT_IMG is None:
+        return ax.plot([xy[0]], [xy[1]], marker="o", markersize=16, color=COLOR_MODEL,
+                       markeredgecolor="white", markeredgewidth=2, zorder=10)[0]
+    box = AnnotationBbox(OffsetImage(ROBOT_IMG, zoom=0.22), xy, frameon=False, zorder=10)
+    ax.add_artist(box)
+    return box
+
+
+def _move_robot(xy):
+    if robot_artist is None:
+        return
+    if hasattr(robot_artist, "xybox"):
+        robot_artist.xy = xy
+        robot_artist.xybox = xy
+    else:
+        robot_artist.set_data([xy[0]], [xy[1]])
+
+
+def _stop_ai_anim():
+    global ai_anim_timer, ai_anim_step
+    if ai_anim_timer is not None:
+        try:
+            ai_anim_timer.stop()
+        except Exception:
+            pass
+    ai_anim_timer = None
+    ai_anim_step = None
+
+
+confetti_timer = None
+confetti_artist = None
+
+
+def _stop_confetti():
+    global confetti_timer, confetti_artist
+    if confetti_timer is not None:
+        try:
+            confetti_timer.stop()
+        except Exception:
+            pass
+    if confetti_artist is not None:
+        try:
+            confetti_artist.remove()
+        except Exception:
+            pass
+    confetti_timer = None
+    confetti_artist = None
+
+
+def _launch_confetti(n: int = 140, frames: int = 45):
+    """Colourful confetti raining over the whole window (figure coordinates)."""
+    global confetti_timer, confetti_artist
+    _stop_confetti()
+    rng = np.random.default_rng()
+    pos = np.column_stack([rng.uniform(0.05, 0.95, n), rng.uniform(0.9, 1.25, n)])
+    vel = np.column_stack([rng.normal(0, 0.004, n), rng.uniform(-0.03, -0.012, n)])
+    palette = [COLOR_OBS, COLOR_FUTURE, COLOR_PRED, COLOR_DRAWN, COLOR_WINDOW, COLOR_MODEL]
+    colors = [palette[i % len(palette)] for i in range(n)]
+    from matplotlib.collections import RegularPolyCollection
+    confetti_artist = fig.add_artist(RegularPolyCollection(
+        4, rotation=np.pi / 4, sizes=rng.uniform(25, 80, n), offsets=pos,
+        offset_transform=fig.transFigure, facecolors=colors, edgecolors="none", zorder=300))
+    state = {"frame": 0}
+
+    def _tick():
+        state["frame"] += 1
+        vel[:, 1] -= 0.0008
+        pos[:] += vel
+        confetti_artist.set_offsets(pos)
+        if state["frame"] >= frames:
+            _stop_confetti()
+        fig.canvas.draw_idle()
+
+    confetti_timer = fig.canvas.new_timer(interval=40)
+    confetti_timer.add_callback(_tick)
+    confetti_timer.start()
+    _launch_confetti._tick = _tick  # handy for headless tests
+
+
+hint_used = False
+
+
+def _hint_len() -> int:
+    """Number of future points revealed by the hint (first quarter)."""
+    return max(2, len(x_future) // 4)
+
+
+def _stars_for(score_display: float) -> int:
+    if score_display < 1:
+        stars = 3
+    elif score_display < 10:
+        stars = 2
+    else:
+        stars = 1
+    return max(1, stars - (1 if hint_used else 0))
+
+
+def _ai_anim_tick():
+    global ai_anim_step
+    mp = _normalize_model_pred(model_pred)
+    if ai_anim_step is None or mp is None or ai_line is None:
+        _stop_ai_anim()
+        return
+    ai_anim_step += 1
+    if ai_anim_step >= len(mp):
+        # Done: full redraw reveals the result banner
+        _stop_ai_anim()
+        _refresh_main_axes()
+        if human_mse is not None and mse_pred is not None and human_mse < mse_pred:
+            _launch_confetti()
+        return
+    ai_line.set_data(x_future[:ai_anim_step], mp[:ai_anim_step])
+    _move_robot((x_future[ai_anim_step - 1], mp[ai_anim_step - 1]))
+    ax.figure.canvas.draw_idle()
+
+
+def _start_ai_anim():
+    global ai_anim_step, ai_anim_timer
+    _stop_ai_anim()
+    if _normalize_model_pred(model_pred) is None or fig is None:
+        _refresh_main_axes()
+        return
+    ai_anim_step = 1
+    _refresh_main_axes()
+    ai_anim_timer = fig.canvas.new_timer(interval=AI_ANIM_INTERVAL_MS)
+    ai_anim_timer.add_callback(_ai_anim_tick)
+    ai_anim_timer.start()
+
+
 def _clear_drawn_points():
+    _stop_ai_anim()
+    _stop_confetti()
     drawn_x.clear()
     drawn_y.clear()
     global human_pred, human_mse, model_pred, mse_pred
@@ -371,112 +577,107 @@ def _refresh_main_axes():
     if ax.figure is not None:
         ax.figure.set_facecolor(FIG_FACE)
 
-    ax.plot(x_obs, y_obs, label="Courbe connue", color=COLOR_OBS, linewidth=2)
-    ax.axvline(x_obs[-1], color=COLOR_OBS, linestyle="--", linewidth=1.5, label="Stop")
-    ax.axvspan(x_future[0], x_future[-1], color=COLOR_WINDOW, alpha=0.25, label="Zone à dessiner")
+    ax.plot(x_obs, y_obs, label="Le passé", color=COLOR_OBS, linewidth=3)
+    ax.axvline(x_obs[-1], color=COLOR_OBS, linestyle="--", linewidth=1.5)
+    ax.axvspan(x_future[0], x_future[-1], color=COLOR_WINDOW, alpha=0.3)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for sp in ax.spines.values():
+        sp.set_edgecolor("#c9d3ee")
+        sp.set_linewidth(2)
 
     # Model prediction (use normalized array)
     if model_pred is not None:
         mp = _normalize_model_pred(model_pred)
         if mp is not None and len(mp) == len(x_future):
-            ax.plot(x_future, mp, color=COLOR_MODEL, linewidth=2.4, label="Prédiction modèle")
+            global ai_line, robot_artist
+            n = len(mp) if ai_anim_step is None else ai_anim_step
+            ai_line, = ax.plot(x_future[:n], mp[:n], color=COLOR_MODEL, linewidth=3,
+                               label="Le robot", solid_capstyle="round")
+            robot_artist = _make_robot((x_future[n - 1], mp[n - 1]))
 
-    # Human validated prediction
+    # Human validated prediction, with the gap to the truth shaded
     if human_pred is not None and len(human_pred) == len(x_future):
-        ax.plot(x_future, y_future, color=COLOR_FUTURE, linewidth=2.4, label="Vraie suite")
-        ax.plot(x_future, human_pred, color=COLOR_PRED, linewidth=2.4, label="Ta prédiction")
+        ax.fill_between(x_future, human_pred, y_future, color=COLOR_PRED, alpha=0.18, linewidth=0)
+        ax.plot(x_future, y_future, color=COLOR_FUTURE, linewidth=3, label="La vraie suite")
+        ax.plot(x_future, human_pred, color=COLOR_PRED, linewidth=3, label="Ta courbe")
+    elif hint_used:
+        k = _hint_len()
+        ax.plot(x_future[:k], y_future[:k], color=COLOR_FUTURE, linewidth=3, linestyle=(0, (2, 2)),
+                label="Indice")
+        img = _emoji_img("\U0001F4A1")
+        if img is not None:
+            from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+            ax.add_artist(AnnotationBbox(OffsetImage(img, zoom=22 / img.shape[0]),
+                                         (x_future[k - 1], y_future[k - 1]), xybox=(0, 18),
+                                         boxcoords="offset points", frameon=False, zorder=9))
 
     # Drawn points (pre/post validation)
-    if drawn_x:
-        ax.scatter(drawn_x, drawn_y, c=COLOR_DRAWN, edgecolors="white", linewidths=0.6, s=60, alpha=0.9, label="Tes points")
+    global drawn_line, hint_artist
+    drawn_line, = ax.plot([], [], color=COLOR_DRAWN, linewidth=4, marker="o", markersize=5,
+                          markeredgecolor="white", solid_capstyle="round",
+                          label="Ta courbe" if human_pred is None else "_nolegend_")
+    _update_drawn_line()
+    drawn_line.set_visible(human_pred is None)
+    hint_artist = None
+    if not drawn_x and human_pred is None:
+        hint_artist = ax.text((x_future[0] + x_future[-1]) / 2, 0.45, "Dessine\nla suite\nici !",
+                              transform=ax.get_xaxis_transform(), ha="center", va="center",
+                              fontsize=17, fontweight="bold", color="#e07a00", linespacing=1.4,
+                              bbox=dict(boxstyle="round,pad=0.6,rounding_size=0.8", facecolor="#ffffff",
+                                        edgecolor=COLOR_WINDOW, linewidth=2.5, alpha=0.9))
+        hint_emoji = _emoji_at(hint_artist, "\u270F\uFE0F", side="top", scale=1.8, pad=0.9)
+        hint_artist._emoji = hint_emoji
 
-    ax.set_xlim(x[0], x[-1])
+    ax.set_xlim(x[max(0, n_obs - 2 * n_future)], x[-1])
     ax.set_ylim(*y_lim)
     ax.set_autoscale_on(False)
-    # Title with dataset and optional stock name
+    # Title: instructions while playing, gentle result banner once validated
     ds_base = _dataset_display_name(current_dataset_name or "?")
-    stock_part = f" | Stock: {current_stock_name}" if current_stock_name else ""
-    # Build title with losses if available
-    title_text = (
-        "Dessine dans la zone jaune la suite\n"
-        f"Jeu de données: {ds_base}{stock_part}"
-    )
-    # Keep title only for dataset/stock; render losses below with colors
-    ax.set_title(title_text, fontsize=14)
-
+    stock_part = f" | Action : {current_stock_name}" if current_stock_name else ""
     _update_legend(ax)
-    # Remove previous loss text artists if any
-    try:
-        prev_loss = getattr(_refresh_main_axes, "_loss_artists", [])
-        for a in prev_loss:
-            try:
-                a.remove()
-            except Exception:
-                pass
-    except Exception:
-        pass
-    loss_artists = []
 
-    # Render colored loss text (best green, worst red) centered under the title
-    try:
-        human_val = None
-        ai_val = None
-        try:
-            if human_mse is not None and np.isfinite(human_mse):
-                human_val = float(human_mse)
-        except Exception:
-            human_val = None
-        try:
-            if mse_pred is not None and np.isfinite(mse_pred):
-                ai_val = float(mse_pred)
-        except Exception:
-            ai_val = None
+    human_val = float(human_mse) if human_mse is not None and np.isfinite(human_mse) else None
+    ai_val = float(mse_pred) if mse_pred is not None and np.isfinite(mse_pred) else None
 
-        if human_val is not None or ai_val is not None:
-            # Decide colors: lower loss is better
-            human_col = "#6c757d"
-            ai_col = "#6c757d"
-            if human_val is not None and ai_val is not None:
-                if human_val < ai_val:
-                    human_col, ai_col = "#2ecc71", "#ff6b6b"
-                elif ai_val < human_val:
-                    human_col, ai_col = "#ff6b6b", "#2ecc71"
-                else:
-                    human_col = ai_col = "#6c757d"
-            else:
-                if human_val is not None:
-                    human_col = "#2ecc71"
-                if ai_val is not None:
-                    ai_col = "#2ecc71"
+    if human_pred is not None and ai_anim_step is not None:
+        t = ax.set_title("Le robot dessine sa prédiction...\nQui sera le plus proche ?",
+                         fontsize=18, fontweight="bold", color=COLOR_MODEL, pad=14)
+        _emoji_at(t, "\U0001F916", "left", scale=1.6)
+        _emoji_at(t, "\U0001F914", "right", scale=1.6)
+    elif human_pred is None or human_val is None:
+        t = ax.set_title(f"Devine la suite de la courbe !\nNiveau : {ds_base}{stock_part}",
+                         fontsize=18, fontweight="bold", color=TEXT_DARK, pad=14)
+        _emoji_at(t, "\U0001F52E", "left", scale=1.6)
+    else:
+        WIN, LOSE, TIE = "#2bb673", "#f25f5c", "#6c757d"
+        if ai_val is None:
+            msg, col, emo = "Voici la vraie suite !", TEXT_DARK, "\U0001F440"
+            human_col = ai_col = TIE
+        elif human_val < ai_val:
+            msg, col, emo = "Bravo, tu as battu le robot !", WIN, "\U0001F389"
+            human_col, ai_col = WIN, LOSE
+        elif human_val > ai_val:
+            msg, col, emo = "Le robot gagne cette fois... Essaie encore !", LOSE, "\U0001F4AA"
+            human_col, ai_col = LOSE, WIN
+        else:
+            msg, col, emo = "Égalité !", TIE, "\U0001F91D"
+            human_col = ai_col = TIE
+        kw = dict(transform=ax.transAxes, va="center", clip_on=False)
+        t = ax.text(0.5, 1.13, msg, ha="center", fontsize=20, fontweight="bold", color=col, **kw)
+        _emoji_at(t, emo, "left")
+        _emoji_at(t, emo, "right")
+        t = ax.text(0.46, 1.045, f"Toi : {_fmt_score(human_val)}", ha="right", fontsize=16,
+                    fontweight="bold", color=human_col, **kw)
+        _emoji_at(t, "\U0001F9D2", "left")
+        ax.text(0.5, 1.045, "vs", ha="center", fontsize=14, color="#b0b7c9", **kw)
+        t = ax.text(0.57, 1.045, f"Robot : {_fmt_score(ai_val) if ai_val is not None else '-'}", ha="left",
+                    fontsize=16, fontweight="bold", color=ai_col, **kw)
+        _emoji_at(t, "\U0001F916", "left")
+        t = ax.text(0.01, 1.045, "Ton dessin :", ha="left", fontsize=12, color="#8a90a6", **kw)
+        _emoji_at(t, "\u2B50" * _stars_for(human_val * SCORE_SCALE), "right", scale=1.3, pad=0.08)
+        ax.text(0.99, 1.045, "zone rose = ton écart", ha="right", fontsize=11, color="#8a90a6", **kw)
 
-            # Build formatted strings
-            human_str = f"Humain: {human_val:.4f}" if human_val is not None else "Humain: -"
-            ai_str = f"IA: {ai_val:.4f}" if ai_val is not None else "IA: -"
-
-            # Draw a rounded background panel to make losses stand out
-            try:
-                from matplotlib.patches import FancyBboxPatch
-                panel = FancyBboxPatch((0.3, 0.9), 0.36, 0.06, transform=ax.transAxes,
-                                       boxstyle="round,pad=0.02", facecolor="#ffffff", edgecolor="#d7d7d7",
-                                       linewidth=1.2, alpha=0.98)
-                ax.add_patch(panel)
-                loss_artists.append(panel)
-            except Exception:
-                pass
-
-            # Larger, bolder text centered inside the panel
-            fontsize_big = 15
-            t_h = ax.text(0.45, 0.93, human_str, ha="right", va="center", fontsize=fontsize_big, fontweight="bold",
-                          color=human_col, transform=ax.transAxes)
-            t_sep = ax.text(0.5, 0.93, "  |  ", ha="center", va="center", fontsize=fontsize_big, fontweight="bold",
-                            color="#333", transform=ax.transAxes)
-            t_ai = ax.text(0.55, 0.93, ai_str, ha="left", va="center", fontsize=fontsize_big, fontweight="bold",
-                           color=ai_col, transform=ax.transAxes)
-            loss_artists.extend([t_h, t_sep, t_ai])
-    except Exception:
-        pass
-
-    _refresh_main_axes._loss_artists = loss_artists
     # Update external ranking panel if present (preferred) otherwise draw nothing here
     try:
         global ranking_ax
@@ -504,13 +705,8 @@ def _refresh_main_axes():
 
             # draw a rounded panel background inside the small axes
             try:
-                from matplotlib.patches import FancyBboxPatch
-                panel = FancyBboxPatch((0.02, 0.02), 0.96, 0.96, transform=ranking_ax.transAxes,
-                                       boxstyle="round,pad=0.02", facecolor=PANEL_BG,
-                                       edgecolor=PANEL_EDGE, linewidth=1.2)
-                ranking_ax.add_patch(panel)
+                _rounded_bg(ranking_ax, PANEL_BG, edge="#d6def5", lw=1.5)
             except Exception:
-                # fallback: rely on text bbox if FancyBboxPatch isn't available
                 pass
 
             # Compute per-line colors (lower loss is better)
@@ -533,30 +729,23 @@ def _refresh_main_axes():
                 human_col = ai_col = NEUTRAL
 
             # Draw lines separately so each can have its own color and style
-            ranking_ax.text(0.5, 0.78, "Classement", ha="center", va="center",
-                            fontsize=11, fontweight="bold", color="#111", transform=ranking_ax.transAxes)
+            rk = dict(va="center", transform=ranking_ax.transAxes)
+            t = ranking_ax.text(0.56, 0.80, "Classement", ha="center", fontsize=13, fontweight="bold",
+                                color=TEXT_DARK, **rk)
+            _emoji_at(t, "\U0001F3C6", "left")
 
-            if mean_human is not None and not np.isnan(mean_human):
-                ranking_ax.text(0.5, 0.56, f"Humain: {mean_human:.4f}", ha="center", va="center",
-                                fontsize=10, color=human_col, transform=ranking_ax.transAxes)
-            else:
-                ranking_ax.text(0.5, 0.56, "Humain: -", ha="center", va="center",
-                                fontsize=10, color=NEUTRAL, transform=ranking_ax.transAxes)
+            has_h = mean_human is not None and not np.isnan(mean_human)
+            has_ai = mean_ai is not None and not np.isnan(mean_ai)
+            t = ranking_ax.text(0.24, 0.52, _fmt_score(mean_human) if has_h else "-", ha="left", fontsize=13,
+                                fontweight="bold", color=human_col if has_h else NEUTRAL, **rk)
+            _emoji_at(t, "\U0001F9D2", "left", scale=1.4)
+            t = ranking_ax.text(0.68, 0.52, _fmt_score(mean_ai) if has_ai else "-", ha="left", fontsize=13,
+                                fontweight="bold", color=ai_col if has_ai else NEUTRAL, **rk)
+            _emoji_at(t, "\U0001F916", "left", scale=1.4)
 
-            if mean_ai is not None and not np.isnan(mean_ai):
-                ranking_ax.text(0.5, 0.36, f"IA: {mean_ai:.4f}", ha="center", va="center",
-                                fontsize=10, color=ai_col, transform=ranking_ax.transAxes)
-            else:
-                ranking_ax.text(0.5, 0.36, "IA: -", ha="center", va="center",
-                                fontsize=10, color=NEUTRAL, transform=ranking_ax.transAxes)
-
-            ranking_ax.text(0.5, 0.16, f"Parties: {count}", ha="center", va="center",
-                            fontsize=9, color="#333", transform=ranking_ax.transAxes)
-
-            # make sure frame looks like a panel
-            for spine in ranking_ax.spines.values():
-                spine.set_edgecolor(PANEL_EDGE)
-                spine.set_linewidth(1.2)
+            t = ranking_ax.text(0.55, 0.2, f"{count} manches jouées", ha="center", fontsize=10,
+                                color="#555", **rk)
+            _emoji_at(t, "\U0001F3AE", "left")
     except Exception:
         pass
 
@@ -610,19 +799,46 @@ def _generate_new_signal(index: int | None = None):
     x_obs, y_obs = x[:n_obs], y[:n_obs]
     x_future, y_future = x[n_obs:], y[n_obs:]
 
-    y_min, y_max = np.nanmin(y), np.nanmax(y)
+    y_min, y_max = np.nanmin(y[max(0, n_obs - 2 * n_future):]), np.nanmax(y[max(0, n_obs - 2 * n_future):])
     pad = 0.05 * (y_max - y_min) if (y_max - y_min) > 0 else 0.05
     y_lim = (y_min - pad, y_max + pad)
     model_pred = None
     mse_pred = None
     # reset human validated prediction
-    global human_pred, human_mse
+    global human_pred, human_mse, hint_used
     human_pred = None
     human_mse = None
+    hint_used = False
 
 # --- Points drawn by the child ---
 drawn_x = []
 drawn_y = []
+drawn_line = None
+
+def _update_drawn_line():
+    """Show the drawn points as one continuous line (sorted left to right)."""
+    if drawn_line is None:
+        return
+    if drawn_x:
+        order = np.argsort(drawn_x)
+        drawn_line.set_data(np.asarray(drawn_x)[order], np.asarray(drawn_y)[order])
+    else:
+        drawn_line.set_data([], [])
+
+def _add_drawn_point(xd, yd):
+    global hint_artist
+    drawn_x.append(xd)
+    drawn_y.append(yd)
+    if hint_artist is not None:
+        try:
+            if getattr(hint_artist, "_emoji", None) is not None:
+                hint_artist._emoji.remove()
+            hint_artist.remove()
+        except Exception:
+            pass
+        hint_artist = None
+    _update_drawn_line()
+    ax.figure.canvas.draw_idle()
 
 # --- Utility: attempt to maximize the figure window (best-effort across backends) ---
 def _maximize_current_figure():
@@ -721,15 +937,10 @@ def _validate_and_plot():
     if mse_pred is not None and human_mse is not None:
         add_result(human_mse, mse_pred)
         print(f"Résultats sauvegardés dans results.json (Human loss: {human_mse:.4f}, AI loss: {mse_pred:.4f})")
-        # Show big overlay with outcome
-        try:
-            _show_result_overlay(human_mse, mse_pred)
-        except Exception:
-            pass
     else:
         print(f"Résultats non sauvegardés (Human loss: {human_mse:.4f}, AI loss: {mse_pred})")
 
-    _refresh_main_axes()
+    _start_ai_anim()
     _update_validate_button_state()
 
     _update_legend(ax)
@@ -746,10 +957,10 @@ def on_press(event):
         and event.ydata is not None and np.isfinite(event.ydata)
         and x_future[0] <= event.xdata <= x_future[-1]
     ):
-        drawn_x.append(event.xdata)
-        drawn_y.append(event.ydata)
-        ax.scatter(event.xdata, event.ydata, c=COLOR_DRAWN, edgecolors="white", linewidths=0.4, s=45)
-        plt.draw()
+        if human_pred is not None:
+            _show_popup("Clique sur « Nouvelle courbe » pour rejouer !", face_color="#6c5ce7")
+            return
+        _add_drawn_point(event.xdata, event.ydata)
     _update_validate_button_state()
 
 def on_move(event):
@@ -761,11 +972,9 @@ def on_move(event):
         and event.xdata is not None and np.isfinite(event.xdata)
         and event.ydata is not None and np.isfinite(event.ydata)
         and x_future[0] <= event.xdata <= x_future[-1]
+        and human_pred is None
     ):
-        drawn_x.append(event.xdata)
-        drawn_y.append(event.ydata)
-        ax.scatter(event.xdata, event.ydata, c=COLOR_DRAWN, edgecolors="white", linewidths=0.4, s=40)
-        plt.draw()
+        _add_drawn_point(event.xdata, event.ydata)
     _update_validate_button_state()
 
 def on_key(event):
@@ -788,6 +997,21 @@ def on_new_signal_button(event):
     print(f"Nouveau signal prêt (n°{current_signal_index}).")
 
 
+def on_hint_button(event):
+    """Button callback: reveal the start of the true continuation (costs one star)."""
+    global hint_used
+    if human_pred is not None:
+        _show_popup("Clique sur « Nouvelle courbe » pour rejouer !", face_color="#6c5ce7")
+        return
+    if hint_used:
+        _show_popup("Tu as déjà ton indice pour cette courbe !", face_color="#ff9f1c")
+        return
+    hint_used = True
+    _refresh_main_axes()
+    _update_validate_button_state()
+    _show_popup("Voici le début de la vraie suite ! (une étoile en moins)", face_color="#ff9f1c")
+
+
 def on_erase_button(event):
     """Button callback: erase current drawn points without changing signal."""
     _clear_drawn_points()
@@ -798,7 +1022,11 @@ def on_erase_button(event):
 
 def on_validate_button(event):
     """Button callback: run validation and display prediction vs ground truth."""
+    if human_pred is not None:
+        _show_popup("Clique sur « Nouvelle courbe » pour rejouer !", face_color="#6c5ce7")
+        return
     if not drawn_x:
+        _show_popup("Dessine d'abord dans la zone jaune !", face_color="#ff9f1c")
         return
     # Ensure model prediction is available before validating so mse_pred can be saved.
     # If model is not currently shown, request it (this may block up to the model timeout).
@@ -834,11 +1062,11 @@ def on_model_button(event):
             signal.signal(signal.SIGALRM, prev)
         pred = np.asarray(pred, dtype=float).reshape(-1)
     except TimeoutError:
-        _show_popup("modèle non connecté", duration_ms=2000, face_color="#ff6f6f")
+        _show_popup("Le robot dort... réessaie !", duration_ms=2000, face_color="#ff6f6f")
         return
     except Exception as exc:
         print(f"Oups, le modèle a eu un souci : {exc}")
-        _show_popup("modèle non connecté", duration_ms=2000, face_color="#ff6f6f")
+        _show_popup("Le robot dort... réessaie !", duration_ms=2000, face_color="#ff6f6f")
         return
 
     if pred.size != len(x_future):
@@ -895,15 +1123,15 @@ if not _load_dataset_by_name("simple.npy"):
 _generate_new_signal()
 
 fig, ax = plt.subplots(figsize=(14, 6))
-plt.subplots_adjust(left=0.08, right=0.78, top=0.9, bottom=0.24)
+plt.subplots_adjust(left=0.04, right=0.76, top=0.86, bottom=0.26)
 _maximize_current_figure()
 
 _clear_drawn_points()
 _refresh_main_axes()
 
 # --- Buttons (Pygame-style palette) ---
-BUTTON_FACE = "#6c5ce7"   # violet doux
-BUTTON_HOVER = "#a29bfe"
+BUTTON_FACE = "#4d96ff"   # bleu vif
+BUTTON_HOVER = "#7ab4ff"
 BUTTON_FACE_IA = "#ff03d9"
 BUTTON_HOVER_IA = "#ff6efc"
 BUTTON_FACE_CHECK = "#2ecc71"  # vert
@@ -912,19 +1140,47 @@ BUTTON_LABEL = "#ffffff"
 CLOSE_FACE = "#ff4b5c"
 CLOSE_HOVER = "#ff6f91"
 
-button_new_ax = fig.add_axes([0.81, 0.29, 0.18, 0.09]) 
+def _style_button(btn, radius_px=18):
+    btn._rpatch = _rounded_bg(btn.ax, btn.color, radius_px=radius_px)
+    btn._hovered = False
+
+
+def _paint_button(btn):
+    if getattr(btn, "_rpatch", None) is not None:
+        btn._rpatch.set_facecolor(btn.hovercolor if btn._hovered else btn.color)
+
+
+def on_hover(event):
+    changed = False
+    for btn in (button_new_signal, button_erase, button_hint, button_validate, button_close):
+        hovered = event.inaxes is btn.ax
+        if hovered != getattr(btn, "_hovered", False):
+            btn._hovered = hovered
+            _paint_button(btn)
+            changed = True
+    if changed:
+        fig.canvas.draw_idle()
+
+
+button_new_ax = fig.add_axes([0.80, 0.40, 0.18, 0.10])
 button_new_ax.set_zorder(5)
-button_new_signal = Button(button_new_ax, "Trouver un nouveau signal 📈", color=BUTTON_FACE, hovercolor=BUTTON_HOVER)
+button_new_signal = Button(button_new_ax, "Nouvelle courbe", color=BUTTON_FACE, hovercolor=BUTTON_HOVER)
 button_new_signal.label.set_color(BUTTON_LABEL)
 button_new_signal.label.set_fontweight("bold")
+button_new_signal.label.set_fontsize(14)
 button_new_signal.on_clicked(on_new_signal_button)
+button_new_signal.label.set_position((0.56, 0.5))
+_emoji_at(button_new_signal.label, "\U0001F3B2", "left", scale=1.4)
 
-button_erase_ax = fig.add_axes([0.81, 0.18, 0.18, 0.09])  
+button_erase_ax = fig.add_axes([0.80, 0.27, 0.18, 0.10])
 button_erase_ax.set_zorder(5)
-button_erase = Button(button_erase_ax, "Effacer ma prédiction 🗑️", color=BUTTON_FACE, hovercolor=BUTTON_HOVER)
+button_erase = Button(button_erase_ax, "Recommencer", color=BUTTON_FACE, hovercolor=BUTTON_HOVER)
 button_erase.label.set_color(BUTTON_LABEL)
 button_erase.label.set_fontweight("bold")
+button_erase.label.set_fontsize(14)
 button_erase.on_clicked(on_erase_button)
+button_erase.label.set_position((0.56, 0.5))
+_emoji_at(button_erase.label, "\U0001F9FD", "left", scale=1.4)
 
 #button_model_ax = fig.add_axes([0.27, 0.06, 0.18, 0.09]) 
 #button_model_ax.set_zorder(5)
@@ -933,18 +1189,32 @@ button_erase.on_clicked(on_erase_button)
 #button_model.label.set_fontweight("bold")
 #button_model.on_clicked(on_model_button)
 
-button_validate_ax = fig.add_axes([0.38, 0.06, 0.18, 0.09]) 
+button_hint_ax = fig.add_axes([0.80, 0.14, 0.18, 0.10])
+button_hint_ax.set_zorder(5)
+button_hint = Button(button_hint_ax, "Indice", color="#ffb703", hovercolor="#ffc94d")
+button_hint.label.set_color(BUTTON_LABEL)
+button_hint.label.set_fontweight("bold")
+button_hint.label.set_fontsize(14)
+button_hint.on_clicked(on_hint_button)
+button_hint.label.set_position((0.56, 0.5))
+_emoji_at(button_hint.label, "\U0001F4A1", "left", scale=1.4, pad=0.6)
+
+button_validate_ax = fig.add_axes([0.30, 0.05, 0.28, 0.13])
 button_validate_ax.set_zorder(5)
-button_validate = Button(button_validate_ax, "Valider ma prédiction ✅", color=BUTTON_FACE_CHECK, hovercolor=BUTTON_HOVER_CHECK)
+button_validate = Button(button_validate_ax, "Valider !", color=BUTTON_FACE_CHECK, hovercolor=BUTTON_HOVER_CHECK)
 button_validate.label.set_color(BUTTON_LABEL)
 button_validate.label.set_fontweight("bold")
+button_validate.label.set_fontsize(20)
 button_validate.on_clicked(on_validate_button)
+button_validate.label.set_position((0.55, 0.5))
+_emoji_at(button_validate.label, "\u2705", "left", scale=1.3)
 
-button_close_ax = fig.add_axes([0.01, 0.92, 0.07, 0.07])
+button_close_ax = fig.add_axes([0.01, 0.92, 0.04, 0.06])
 button_close_ax.set_zorder(6)
-button_close = Button(button_close_ax, "❌", color=CLOSE_FACE, hovercolor=CLOSE_HOVER)
+button_close = Button(button_close_ax, "X", color=CLOSE_FACE, hovercolor=CLOSE_HOVER)
 button_close.label.set_color("#ffffff")
 button_close.label.set_fontsize(16)
+button_close.label.set_fontweight("bold")
 button_close.on_clicked(on_close_button)
 
 def _update_validate_button_state():
@@ -960,35 +1230,41 @@ def _update_validate_button_state():
     try:
         button_validate.color = face
         button_validate.hovercolor = hover
-        button_validate.ax.set_facecolor(face)
+        _paint_button(button_validate)
         button_validate.label.set_color(BUTTON_LABEL)
+        hint_off = hint_used or human_pred is not None
+        button_hint.color = "#bcbec2" if hint_off else "#ffb703"
+        button_hint.hovercolor = "#d0d3d8" if hint_off else "#ffc94d"
+        _paint_button(button_hint)
         fig.canvas.draw_idle()
     except Exception:
         pass
 
 # Dataset selector radio panel (right side)
-radio_ax = fig.add_axes([0.85, 0.75, 0.10, 0.12])
+radio_ax = fig.add_axes([0.80, 0.68, 0.18, 0.17])
 radio_ax.set_zorder(6)
 radio_ax.set_facecolor("#ffffff")
 for spine in radio_ax.spines.values():
     spine.set_edgecolor("#0f1115")
     spine.set_linewidth(1.2)
-radio_ax.set_title("Jeu de données", color="#222", fontsize=11, pad=8)
+radio_ax.set_title("Choisis ton niveau", color=TEXT_DARK, fontsize=13, fontweight="bold", pad=8)
 radio_labels = [ _dataset_display_name(n) for n in DATASET_OPTIONS ]
 radio_datasets = RadioButtons(radio_ax, radio_labels, active=current_dataset_index)
 try:
-    radio_datasets.activecolor = "#6c5ce7"
+    radio_datasets.activecolor = "#4d96ff"
 except Exception:
     pass
 for text in radio_datasets.labels:
     text.set_color("#111")
-    text.set_fontsize(11)
+    text.set_fontsize(13)
     text.set_fontweight("bold")
 radio_datasets.on_clicked(on_radio_dataset)
+for text, emo in zip(radio_datasets.labels, ["\U0001F423", "\U0001F680", "\U0001F4C8"]):
+    _emoji_at(text, emo, "right", scale=1.3)
 
 # Ranking panel (external, bottom-right). Coordinates chosen to sit outside main axes.
 try:
-    ranking_ax = fig.add_axes([0.02, 0.06, 0.18, 0.09])
+    ranking_ax = fig.add_axes([0.03, 0.03, 0.23, 0.17])
     ranking_ax.set_zorder(6)
     ranking_ax.set_facecolor("#ffffff")
     ranking_ax.set_xticks([])
@@ -1002,18 +1278,19 @@ except Exception:
 # Initialize validate button state
 _update_validate_button_state()
 
-#for btn_ax in (button_new_ax, button_model_ax, button_validate_ax, button_erase_ax, button_close_ax, radio_ax):
-for btn_ax in (button_new_ax, button_validate_ax, button_erase_ax, button_close_ax, radio_ax):
-    for spine in btn_ax.spines.values():
-        if btn_ax is button_close_ax:
-            spine.set_edgecolor(CLOSE_HOVER)
-        else:
-            spine.set_edgecolor("#0f1115")
-        spine.set_linewidth(2)
+fig.canvas.draw()  # resolve axes sizes so rounded corners come out circular
+for btn in (button_new_signal, button_erase, button_hint, button_validate):
+    _style_button(btn)
+_style_button(button_close, radius_px=10)
+_rounded_bg(radio_ax, "#ffffff", edge="#d6def5", lw=1.5)
+if ranking_ax is not None:
+    ranking_ax.set_frame_on(False)
+_update_validate_button_state()
 
 # --- Event bindings ---
 fig.canvas.mpl_connect("button_press_event", on_press)
 fig.canvas.mpl_connect("motion_notify_event", on_move)
+fig.canvas.mpl_connect("motion_notify_event", on_hover)
 fig.canvas.mpl_connect("key_press_event", on_key)
 
 plt.show()
