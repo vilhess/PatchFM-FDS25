@@ -451,7 +451,7 @@ hint_used = False
 
 
 def _hint_len() -> int:
-    """Number of future points revealed by the hint (first quarter)."""
+    """Number of future points revealed by the hint (last quarter of the zone)."""
     return max(2, len(x_future) // 4)
 
 
@@ -549,6 +549,8 @@ def _apply_view(redraw: bool = True):
         mp = _normalize_model_pred(model_pred)
         if mp is not None:
             vals.append(mp)
+    elif hint_used:
+        vals.append(y_future[-_hint_len():])
     if drawn_y:
         vals.append(np.asarray(drawn_y))
     seg = np.concatenate([np.asarray(v, dtype=float).reshape(-1) for v in vals if len(v)])
@@ -639,13 +641,13 @@ def _refresh_main_axes():
         ax.plot(x_future, human_pred, color=COLOR_PRED, linewidth=3, label="Ta courbe")
     elif hint_used:
         k = _hint_len()
-        ax.plot(x_future[:k], y_future[:k], color=COLOR_FUTURE, linewidth=3, linestyle=(0, (2, 2)),
+        ax.plot(x_future[-k:], y_future[-k:], color=COLOR_FUTURE, linewidth=3, linestyle=(0, (2, 2)),
                 label="Indice")
         img = _emoji_img("\U0001F4A1")
         if img is not None:
             from matplotlib.offsetbox import OffsetImage, AnnotationBbox
             ax.add_artist(AnnotationBbox(OffsetImage(img, zoom=22 / img.shape[0]),
-                                         (x_future[k - 1], y_future[k - 1]), xybox=(0, 18),
+                                         (x_future[-k], y_future[-k]), xybox=(0, 18),
                                          boxcoords="offset points", frameon=False, zorder=9))
 
     # Drawn points (pre/post validation)
@@ -1061,7 +1063,7 @@ def on_hint_button(event):
     hint_used = True
     _refresh_main_axes()
     _update_validate_button_state()
-    _show_popup("Voici le début de la vraie suite ! (une étoile en moins)", face_color="#ff9f1c")
+    _show_popup("Voici où arrive la courbe ! (une étoile en moins)", face_color="#ff9f1c")
 
 
 def on_erase_button(event):
