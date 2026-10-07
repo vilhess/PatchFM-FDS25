@@ -11,7 +11,10 @@ import pickle
 from utils import add_result, get_results
 from patchfm import Forecaster, PatchFMConfig
 
-plt.rcParams["font.family"] = ["Arial Rounded MT Bold", "DejaVu Sans"]
+from matplotlib import font_manager as _fm
+_installed = {f.name for f in _fm.fontManager.ttflist}
+plt.rcParams["font.family"] = [f for f in ["Arial Rounded MT Bold", "Nunito", "Ubuntu", "DejaVu Sans"]
+                               if f in _installed] or ["DejaVu Sans"]
 
 # --- Model setup ---
 config = PatchFMConfig(compile=False, full_leakage=False)
@@ -351,14 +354,39 @@ robot_artist = None
 
 
 _EMOJI_CACHE = {}
+# (path, size): bitmap emoji fonts only load at their native size (Noto Color Emoji = 109)
+_EMOJI_FONTS = [
+    ("/System/Library/Fonts/Apple Color Emoji.ttc", 160),
+    ("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf", 109),
+    ("/usr/share/fonts/noto/NotoColorEmoji.ttf", 109),
+    ("/usr/share/fonts/google-noto-emoji/NotoColorEmoji.ttf", 109),
+    ("/usr/share/fonts/noto-emoji/NotoColorEmoji.ttf", 109),
+    ("C:/Windows/Fonts/seguiemj.ttf", 160),
+]
+_EMOJI_FONT = None
+
+
+def _load_emoji_font():
+    global _EMOJI_FONT
+    if _EMOJI_FONT is None:
+        from PIL import ImageFont
+        for path, size in _EMOJI_FONTS:
+            try:
+                _EMOJI_FONT = ImageFont.truetype(path, size)
+                break
+            except OSError:
+                continue
+        else:
+            raise OSError("no colour emoji font found")
+    return _EMOJI_FONT
 
 
 def _emoji_img(chars: str):
     """Render emoji to an RGBA array (matplotlib can't draw colour emoji itself). None if unavailable."""
     if chars not in _EMOJI_CACHE:
         try:
-            from PIL import Image, ImageDraw, ImageFont
-            font = ImageFont.truetype("/System/Library/Fonts/Apple Color Emoji.ttc", 160)
+            from PIL import Image, ImageDraw
+            font = _load_emoji_font()
             im = Image.new("RGBA", (180 * len(chars) + 20, 200), (0, 0, 0, 0))
             ImageDraw.Draw(im).text((10, 10), chars, font=font, embedded_color=True)
             _EMOJI_CACHE[chars] = np.asarray(im.crop(im.getbbox()))
