@@ -1632,10 +1632,19 @@ def _select_avatar(i: int):
     fig.canvas.draw_idle()
 
 
+def _set_game_widgets(enabled: bool):
+    """Hide/disable the game widgets: matplotlib buttons repaint themselves on hover (blitting),
+    which would otherwise make them pop through the welcome screen."""
+    for w in (button_new_signal, button_erase, button_hint, button_validate, button_close, radio_datasets):
+        w.active = enabled   # not set_active(): RadioButtons overrides it to pick an option
+        w.ax.set_visible(enabled)
+
+
 def _show_welcome():
     global welcome_active
     from matplotlib.patches import FancyBboxPatch, Ellipse
     welcome_active = True
+    _set_game_widgets(False)
     fw, fh = fig.get_size_inches()
 
     def add(a):
@@ -1687,6 +1696,7 @@ def _close_welcome():
             pass
     welcome_artists.clear()
     welcome_active = False
+    _set_game_widgets(True)
     _refresh_main_axes()
     _start_past_anim()
     _robot_say("hello")
